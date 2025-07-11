@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-// Firebase imports are removed as authentication is no longer used directly in the frontend for user management
+// Firebase imports removed
 
 // Helper functions for date comparisons
 const getTodayDateString = () => {
@@ -49,30 +49,35 @@ const App = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [currentView, setCurrentView] = useState('today');
   const [message, setMessage] = useState(null);
-  const [userId, setUserId] = useState(null); // User ID for API calls, now managed locally
+  const [userId, setUserId] = useState(null); // User ID for API calls
+  const [userEmail, setUserEmail] = useState(null); // User email for display
   const [isLoadingTasks, setIsLoadingTasks] = useState(true); // Loading state for tasks
+  const [isLoggedIn, setIsLoggedIn] = useState(false); // Track login state
 
-  // Manage a persistent anonymous userId using localStorage
+  // Check for existing userId in localStorage on mount
   useEffect(() => {
-    let currentUserId = localStorage.getItem('anonUserId');
-    if (!currentUserId) {
-      currentUserId = crypto.randomUUID();
-      localStorage.setItem('anonUserId', currentUserId);
+    const storedUserId = localStorage.getItem('user_id');
+    const storedUserEmail = localStorage.getItem('user_email');
+    if (storedUserId && storedUserEmail) {
+      setUserId(storedUserId);
+      setUserEmail(storedUserEmail);
+      setIsLoggedIn(true);
+    } else {
+      setIsLoadingTasks(false); // No user, no tasks to load initially
     }
-    setUserId(currentUserId);
   }, []);
 
-  // Fetch tasks from Vercel Postgres API when user ID is available
+  // Fetch tasks from Vercel Postgres API when userId is available and logged in
   useEffect(() => {
     const fetchTasks = async () => {
-      if (!userId) { // Wait for userId to be set
-        setIsLoadingTasks(true);
+      if (!isLoggedIn || !userId) {
+        setIsLoadingTasks(false); // Not logged in, no tasks to fetch
         return;
       }
 
       setIsLoadingTasks(true);
       try {
-        const response = await fetch(`/api/tasks?userId=${userId}`, { // Pass userId as query param
+        const response = await fetch(`/api/tasks?userId=${userId}`, {
           headers: {
             'Content-Type': 'application/json',
           },
@@ -92,23 +97,42 @@ const App = () => {
     };
 
     fetchTasks();
-    // In a real-time scenario, you might want to poll or use WebSockets
-    // For simplicity, we fetch once on userId change.
-  }, [userId]); // Re-fetch when userId changes
+  }, [userId, isLoggedIn]);
+
+  // Handle successful login
+  const handleLoginSuccess = (id, email) => {
+    localStorage.setItem('user_id', id);
+    localStorage.setItem('user_email', email);
+    setUserId(id);
+    setUserEmail(email);
+    setIsLoggedIn(true);
+    setMessage("Đăng nhập thành công!");
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('user_email');
+    setUserId(null);
+    setUserEmail(null);
+    setTasks([]); // Clear tasks on logout
+    setIsLoggedIn(false);
+    setMessage("Đã đăng xuất.");
+  };
 
   // API Operations (using fetch to Vercel API Routes)
   const addTask = async (newTask) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để thêm công việc.");
       return;
     }
     try {
-      const response = await fetch(`/api/tasks?userId=${userId}`, { // Pass userId for demo
+      const response = await fetch(`/api/tasks?userId=${userId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...newTask, userId: userId }), // Ensure userId is sent
+        body: JSON.stringify({ ...newTask, userId: userId }),
       });
 
       if (!response.ok) {
@@ -116,7 +140,6 @@ const App = () => {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       setMessage("Đã thêm công việc thành công!");
-      // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -131,16 +154,16 @@ const App = () => {
 
   const updateTask = async (updatedTask) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để cập nhật công việc.");
       return;
     }
     try {
-      const response = await fetch(`/api/tasks/${updatedTask.id}?userId=${userId}`, { // Pass userId for demo
+      const response = await fetch(`/api/tasks/${updatedTask.id}?userId=${userId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...updatedTask, userId: userId }), // Ensure userId is sent
+        body: JSON.stringify({ ...updatedTask, userId: userId }),
       });
 
       if (!response.ok) {
@@ -148,7 +171,6 @@ const App = () => {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       setMessage("Đã cập nhật công việc thành công!");
-      // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -164,11 +186,11 @@ const App = () => {
 
   const deleteTask = async (id) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để xóa công việc.");
       return;
     }
     try {
-      const response = await fetch(`/api/tasks/${id}?userId=${userId}`, { // Pass userId for demo
+      const response = await fetch(`/api/tasks/${id}?userId=${userId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -178,7 +200,6 @@ const App = () => {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       setMessage("Đã xóa công việc thành công!");
-      // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -198,20 +219,19 @@ const App = () => {
 
   const handleChangeStatus = async (id, newStatus) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để thay đổi trạng thái công việc.");
       return;
     }
-    // Find the task to get its current data, then update status
     const taskToUpdate = tasks.find(task => task.id === id);
     if (!taskToUpdate) {
       setMessage("Không tìm thấy công việc để cập nhật trạng thái.");
       return;
     }
     try {
-      const response = await fetch(`/api/tasks/${id}?userId=${userId}`, { // Pass userId for demo
+      const response = await fetch(`/api/tasks/${id}?userId=${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...taskToUpdate, status: newStatus, userId: userId }), // Send full task data with new status
+        body: JSON.stringify({ ...taskToUpdate, status: newStatus, userId: userId }),
       });
 
       if (!response.ok) {
@@ -219,7 +239,6 @@ const App = () => {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       setMessage("Đã cập nhật trạng thái công việc!");
-      // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -232,10 +251,10 @@ const App = () => {
   };
 
   const isTaskOverdue = (task) => {
-    if (!task.due_date || task.status === 'completed') return false; // Use task.due_date from Postgres
+    if (!task.due_date || task.status === 'completed') return false;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const taskDueDate = new Date(task.due_date); // Use task.due_date from Postgres
+    const taskDueDate = new Date(task.due_date);
     taskDueDate.setHours(0, 0, 0, 0);
     return taskDueDate < today;
   };
@@ -256,13 +275,22 @@ const App = () => {
   };
 
   const todayDateString = getTodayDateString();
-  const todayTasks = tasks.filter(task => task.due_date === todayDateString); // Use task.due_date
+  const todayTasks = tasks.filter(task => task.due_date === todayDateString);
 
   const doingTasksToday = todayTasks.filter(task => task.status === 'doing' && !isTaskOverdue(task));
   const overdueTasksToday = todayTasks.filter(task => task.status === 'doing' && isTaskOverdue(task));
   const completedTasksToday = todayTasks.filter(task => task.status === 'completed');
 
-  // No longer checking for isAuthReady or user.isAnonymous, directly render main app
+  // Render AuthPage if user is not logged in
+  if (!isLoggedIn) {
+    return (
+      <AuthPage
+        onLoginSuccess={handleLoginSuccess}
+        setMessage={setMessage}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 font-sans text-gray-800 p-4 sm:p-6 lg:p-8">
       {/* Header */}
@@ -270,9 +298,13 @@ const App = () => {
         <h1 className="text-4xl font-bold text-blue-700 mb-2">Quản Lý Công Việc Cá Nhân</h1>
         <p className="text-lg text-gray-600">Sắp xếp ngày của bạn một cách hiệu quả!</p>
         <div className="mt-4 text-sm text-gray-600">
-          {/* Display anonymous user ID */}
-          <p>ID phiên của bạn: <span className="font-mono break-all">{userId || 'Đang tạo...'}</span></p>
-          <p className="text-red-500 font-semibold mt-1">Lưu ý: Dữ liệu được lưu trữ riêng theo ID này. Không có xác thực người dùng.</p>
+          <p>Xin chào, <span className="font-semibold">{userEmail || 'Người dùng'}</span></p>
+          <button
+            onClick={handleLogout}
+            className="mt-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 text-sm"
+          >
+            Đăng xuất
+          </button>
         </div>
       </header>
 
@@ -416,6 +448,128 @@ const App = () => {
 
       {/* Custom Message Modal */}
       {message && <MessageModal message={message} onClose={() => setMessage(null)} />}
+    </div>
+  );
+};
+
+// Component for Authentication (Login/Signup)
+const AuthPage = ({ onLoginSuccess, setMessage }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [adminPassword, setAdminPassword] = useState(''); // New state for admin password
+  const [isLoading, setIsLoading] = useState(false);
+
+  const ADMIN_PASSWORD = "tachyonai@2025"; // Default admin password
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      if (isLogin) {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Đăng nhập thất bại.');
+        }
+        onLoginSuccess(data.userId, data.email); // Pass userId and email to App component
+      } else {
+        // Registration logic with admin password check
+        if (adminPassword !== ADMIN_PASSWORD) {
+          setMessage("Mật khẩu admin không đúng.");
+          setIsLoading(false);
+          return;
+        }
+        const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Đăng ký thất bại.');
+        }
+        setMessage("Đăng ký thành công! Vui lòng đăng nhập.");
+        setIsLogin(true); // Switch to login after successful registration
+      }
+    } catch (error) {
+      console.error("Authentication error:", error);
+      setMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+        <h2 className="text-3xl font-bold text-center text-blue-700 mb-6">
+          {isLogin ? 'Đăng Nhập' : 'Đăng Ký'}
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
+            <input
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+          {!isLogin && ( // Show admin password field only for registration
+            <div>
+              <label htmlFor="adminPassword" className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu Admin</label>
+              <input
+                type="password"
+                id="adminPassword"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>
+            ) : (
+              isLogin ? 'Đăng Nhập' : 'Đăng Ký'
+            )}
+          </button>
+        </form>
+        <p className="mt-6 text-center text-gray-600">
+          {isLogin ? 'Chưa có tài khoản?' : 'Đã có tài khoản?'}
+          <button
+            onClick={() => setIsLogin(!isLogin)}
+            className="ml-2 text-blue-600 hover:text-blue-800 font-medium"
+          >
+            {isLogin ? 'Đăng ký ngay' : 'Đăng nhập'}
+          </button>
+        </p>
+      </div>
     </div>
   );
 };

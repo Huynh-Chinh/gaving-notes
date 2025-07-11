@@ -1,27 +1,16 @@
-// File: pages/api/tasks.js
-// Đây là file xử lý các yêu cầu GET (lấy tất cả task) và POST (tạo task mới)
-
 import { sql } from '@vercel/postgres';
-// import { getAuth } from 'firebase-admin/auth'; // Uncomment and configure if you want to verify Firebase ID tokens on backend
+// Firebase Admin SDK imports removed as authentication is now handled by custom APIs
 
 export default async function handler(req, res) {
-  // --- Placeholder for Firebase ID Token Verification ---
-  // In a real application, you would verify the Firebase ID token sent from the frontend
-  // const idToken = req.headers.authorization?.split('Bearer ')[1];
-  // if (!idToken) {
-  //   return res.status(401).json({ error: 'Unauthorized: No token provided' });
-  // }
-  // try {
-  //   const decodedToken = await getAuth().verifyIdToken(idToken);
-  //   const userId = decodedToken.uid;
-  //   // Use userId for database operations
-  // } catch (error) {
-  //   console.error('Error verifying Firebase ID token:', error);
-  //   return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-  // }
-  // For this example, we'll assume the userId is passed directly or hardcoded for demonstration.
-  // In a real app, you'd get the userId from the decodedToken.
-  const userId = req.query.userId || 'demo_user_id'; // IMPORTANT: Replace with actual verified user ID in production
+  // IMPORTANT: In a production application, you MUST implement robust authentication
+  // and authorize the user based on a secure token (e.g., JWT)
+  // obtained from your /api/login endpoint, instead of relying on a userId from query parameters.
+  // This current approach is for demonstration purposes only and is INSECURE.
+  const userId = req.query.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: User ID is required.' });
+  }
 
   if (req.method === 'GET') {
     try {

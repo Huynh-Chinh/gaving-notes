@@ -1,25 +1,17 @@
-// File: pages/api/tasks/[id].js
-// Đây là file xử lý các yêu cầu PUT (cập nhật task) và DELETE (xóa task) cho một task cụ thể
-
 import { sql } from '@vercel/postgres';
-// import { getAuth } from 'firebase-admin/auth'; // Uncomment and configure if you want to verify Firebase ID tokens on backend
+// Firebase Admin SDK imports removed as authentication is now handled by custom APIs
 
 export default async function handler(req, res) {
   const { id } = req.query; // Get task ID from dynamic route
-  // --- Placeholder for Firebase ID Token Verification ---
-  // const idToken = req.headers.authorization?.split('Bearer ')[1];
-  // if (!idToken) {
-  //   return res.status(401).json({ error: 'Unauthorized: No token provided' });
-  // }
-  // try {
-  //   const decodedToken = await getAuth().verifyIdToken(idToken);
-  //   const userId = decodedToken.uid;
-  //   // Use userId for database operations
-  // } catch (error) {
-  //   console.error('Error verifying Firebase ID token:', error);
-  //   return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-  // }
-  const userId = req.query.userId || 'demo_user_id'; // IMPORTANT: Replace with actual verified user ID in production
+  // IMPORTANT: In a production application, you MUST implement robust authentication
+  // and authorize the user based on a secure token (e.g., JWT)
+  // obtained from your /api/login endpoint, instead of relying on a userId from query parameters.
+  // This current approach is for demonstration purposes only and is INSECURE.
+  const userId = req.query.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: User ID is required.' });
+  }
 
   if (req.method === 'PUT') {
     const { title, description, estimated_hours, due_date, start_time, end_time, instructions, label, status } = req.body;
