@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-// Firebase imports are removed as authentication is no longer used directly in the frontend for user management
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
 
 // Helper functions for date comparisons
 const getTodayDateString = () => {
@@ -41,6 +50,9 @@ const getEndOfMonth = (date) => {
   return endOfMonth;
 };
 
+// Initialize Firebase (will be done once in App component)
+let app, auth;
+
 // Main App component
 const App = () => {
   const [tasks, setTasks] = useState([]);
@@ -49,32 +61,71 @@ const App = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [currentView, setCurrentView] = useState('today');
   const [message, setMessage] = useState(null);
-  const [userId, setUserId] = useState(null); // User ID for API calls, now managed locally
+  const [user, setUser] = useState(null); // Firebase user object
+  const [userId, setUserId] = useState(null); // User ID for API calls
+  const [isAuthReady, setIsAuthReady] = useState(false); // To ensure Firebase auth is ready
   const [isLoadingTasks, setIsLoadingTasks] = useState(true); // Loading state for tasks
 
-  // Manage a persistent anonymous userId using localStorage
+  // Firebase Initialization and Auth Listener
   useEffect(() => {
-    let currentUserId = localStorage.getItem('anonUserId');
-    if (!currentUserId) {
-      currentUserId = crypto.randomUUID();
-      localStorage.setItem('anonUserId', currentUserId);
+    try {
+      // These variables are provided by the Canvas environment.
+      // For a standalone Next.js app, you would get these from .env.local or similar.
+      const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+      const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+      if (!app) { // Initialize Firebase only once
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+      }
+
+      const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+        if (currentUser) {
+          setUser(currentUser);
+          setUserId(currentUser.uid);
+        } else {
+          // Sign in anonymously if no initial token, or if user logs out
+          if (initialAuthToken) {
+            try {
+              await signInWithCustomToken(auth, initialAuthToken);
+            } catch (error) {
+              console.error("Error signing in with custom token:", error);
+              await signInAnonymously(auth);
+            }
+          } else {
+            await signInAnonymously(auth);
+          }
+          setUser(auth.currentUser); // Set user after anonymous sign-in
+          setUserId(auth.currentUser?.uid || crypto.randomUUID()); // Use anonymous UID or random for unauthenticated
+        }
+        setIsAuthReady(true);
+      });
+
+      return () => unsubscribe(); // Cleanup auth listener on unmount
+    } catch (error) {
+      console.error("Failed to initialize Firebase:", error);
+      setMessage("Lỗi khởi tạo Firebase. Vui lòng thử lại.");
     }
-    setUserId(currentUserId);
   }, []);
 
   // Fetch tasks from Vercel Postgres API when user ID is available
   useEffect(() => {
     const fetchTasks = async () => {
-      if (!userId) { // Wait for userId to be set
+      if (!isAuthReady || !userId) {
         setIsLoadingTasks(true);
         return;
       }
 
       setIsLoadingTasks(true);
       try {
-        const response = await fetch(`/api/tasks?userId=${userId}`, { // Pass userId as query param
+        // Get Firebase ID token for authentication with backend API
+        // In a real app, you would send this token in the Authorization header
+        // const idToken = await auth.currentUser?.getIdToken();
+
+        const response = await fetch(`/api/tasks?userId=${userId}`, { // Pass userId as query param for demo
           headers: {
             'Content-Type': 'application/json',
+            // 'Authorization': `Bearer ${idToken}` // In a real app, send ID token for backend verification
           },
         });
 
@@ -93,20 +144,22 @@ const App = () => {
 
     fetchTasks();
     // In a real-time scenario, you might want to poll or use WebSockets
-    // For simplicity, we fetch once on userId change.
-  }, [userId]); // Re-fetch when userId changes
+    // For simplicity, we fetch once on userId/authReady change.
+  }, [userId, isAuthReady, user]); // Re-fetch when user or auth state changes
 
   // API Operations (using fetch to Vercel API Routes)
   const addTask = async (newTask) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để thêm công việc.");
       return;
     }
     try {
+      // const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`/api/tasks?userId=${userId}`, { // Pass userId for demo
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({ ...newTask, userId: userId }), // Ensure userId is sent
       });
@@ -118,7 +171,10 @@ const App = () => {
       setMessage("Đã thêm công việc thành công!");
       // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
       });
       const updatedTasks = await updatedResponse.json();
       setTasks(updatedTasks);
@@ -131,14 +187,16 @@ const App = () => {
 
   const updateTask = async (updatedTask) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để cập nhật công việc.");
       return;
     }
     try {
+      // const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`/api/tasks/${updatedTask.id}?userId=${userId}`, { // Pass userId for demo
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({ ...updatedTask, userId: userId }), // Ensure userId is sent
       });
@@ -150,7 +208,10 @@ const App = () => {
       setMessage("Đã cập nhật công việc thành công!");
       // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
       });
       const updatedTasks = await updatedResponse.json();
       setTasks(updatedTasks);
@@ -164,13 +225,17 @@ const App = () => {
 
   const deleteTask = async (id) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để xóa công việc.");
       return;
     }
     try {
+      // const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`/api/tasks/${id}?userId=${userId}`, { // Pass userId for demo
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
       });
 
       if (!response.ok) {
@@ -180,7 +245,10 @@ const App = () => {
       setMessage("Đã xóa công việc thành công!");
       // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
       });
       const updatedTasks = await updatedResponse.json();
       setTasks(updatedTasks);
@@ -198,7 +266,7 @@ const App = () => {
 
   const handleChangeStatus = async (id, newStatus) => {
     if (!userId) {
-      setMessage("ID người dùng chưa sẵn sàng. Vui lòng thử lại.");
+      setMessage("Bạn cần đăng nhập để thay đổi trạng thái công việc.");
       return;
     }
     // Find the task to get its current data, then update status
@@ -208,9 +276,13 @@ const App = () => {
       return;
     }
     try {
+      // const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`/api/tasks/${id}?userId=${userId}`, { // Pass userId for demo
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
         body: JSON.stringify({ ...taskToUpdate, status: newStatus, userId: userId }), // Send full task data with new status
       });
 
@@ -221,7 +293,10 @@ const App = () => {
       setMessage("Đã cập nhật trạng thái công việc!");
       // Re-fetch tasks to update the UI
       const updatedResponse = await fetch(`/api/tasks?userId=${userId}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': `Bearer ${idToken}`
+        },
       });
       const updatedTasks = await updatedResponse.json();
       setTasks(updatedTasks);
@@ -262,7 +337,28 @@ const App = () => {
   const overdueTasksToday = todayTasks.filter(task => task.status === 'doing' && isTaskOverdue(task));
   const completedTasksToday = todayTasks.filter(task => task.status === 'completed');
 
-  // No longer checking for isAuthReady or user.isAnonymous, directly render main app
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center text-gray-700">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-lg">Đang tải ứng dụng...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render AuthPage if user is not logged in (and not anonymous from initial token)
+  if (!user || user.isAnonymous) {
+    return (
+      <AuthPage
+        auth={auth}
+        setMessage={setMessage}
+        onLoginSuccess={() => { /* App component will re-render with authenticated user */ }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 font-sans text-gray-800 p-4 sm:p-6 lg:p-8">
       {/* Header */}
@@ -270,9 +366,13 @@ const App = () => {
         <h1 className="text-4xl font-bold text-blue-700 mb-2">Quản Lý Công Việc Cá Nhân</h1>
         <p className="text-lg text-gray-600">Sắp xếp ngày của bạn một cách hiệu quả!</p>
         <div className="mt-4 text-sm text-gray-600">
-          {/* Display anonymous user ID */}
-          <p>ID phiên của bạn: <span className="font-mono break-all">{userId || 'Đang tạo...'}</span></p>
-          <p className="text-red-500 font-semibold mt-1">Lưu ý: Dữ liệu được lưu trữ riêng theo ID này. Không có xác thực người dùng.</p>
+          <p>Xin chào, <span className="font-semibold">{user.email || user.uid}</span></p>
+          <button
+            onClick={() => signOut(auth)}
+            className="mt-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 text-sm"
+          >
+            Đăng xuất
+          </button>
         </div>
       </header>
 
@@ -420,6 +520,102 @@ const App = () => {
   );
 };
 
+// Component for Authentication (Login/Signup)
+const AuthPage = ({ auth, setMessage, onLoginSuccess }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+        setMessage("Đăng nhập thành công!");
+        onLoginSuccess(); // Trigger re-render of App component
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+        setMessage("Đăng ký thành công! Vui lòng đăng nhập.");
+        setIsLogin(true); // Switch to login after successful registration
+      }
+    } catch (error) {
+      console.error("Authentication error:", error);
+      let errorMessage = "Đã xảy ra lỗi. Vui lòng thử lại.";
+      if (error.code === 'auth/invalid-email') {
+        errorMessage = "Email không hợp lệ.";
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        errorMessage = "Email hoặc mật khẩu không đúng.";
+      } else if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "Email này đã được sử dụng.";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = "Mật khẩu quá yếu (ít nhất 6 ký tự).";
+      }
+      setMessage(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+        <h2 className="text-3xl font-bold text-center text-blue-700 mb-6">
+          {isLogin ? 'Đăng Nhập' : 'Đăng Ký'}
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
+            <input
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>
+            ) : (
+              isLogin ? 'Đăng Nhập' : 'Đăng Ký'
+            )}
+          </button>
+        </form>
+        <p className="mt-6 text-center text-gray-600">
+          {isLogin ? 'Chưa có tài khoản?' : 'Đã có tài khoản?'}
+          <button
+            onClick={() => setIsLogin(!isLogin)}
+            className="ml-2 text-blue-600 hover:text-blue-800 font-medium"
+          >
+            {isLogin ? 'Đăng ký ngay' : 'Đăng nhập'}
+          </button>
+        </p>
+        <p className="mt-4 text-center text-gray-500 text-sm">
+          ID người dùng hiện tại (chỉ hiển thị): <span className="font-mono break-all">{auth.currentUser?.uid || 'Đang tải...'}</span>
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // Component for a list of tasks (e.g., Doing, Overdue, Completed)
 const TaskList = ({ title, tasks, onEdit, onViewDetails, onChangeStatus, statusColor, isOverdueList = false, getLabelColorClass, isTaskOverdue }) => {
   return (
@@ -508,7 +704,7 @@ const TaskItem = ({ task, onEdit, onViewDetails, onChangeStatus, isOverdue, getL
   );
 };
 
-// Modal component for forms and details (unchanged)
+// Modal component for forms and details
 const Modal = ({ children, onClose }) => {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -679,8 +875,7 @@ const TaskDetailModal = ({ task, onClose, onDelete, onEdit, updateTask, getLabel
       let chatHistory = [];
       chatHistory.push({ role: "user", parts: [{ text: prompt }] });
       const payload = { contents: chatHistory };
-      // Retrieve API key from environment variable
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
+      const apiKey = ""; // Leave this as-is; Canvas will provide the key at runtime.
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
       const response = await fetch(apiUrl, {
